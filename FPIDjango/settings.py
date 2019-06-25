@@ -292,12 +292,12 @@ LOGGING = {
         'django': {
             'level': 'DEBUG',
             'class': 'logging.FileHandler',
-            'filename': join(LOG_DIR, 'django.log')
+            'filename':  'django.log'
         },
         'fpiweb': {
             'level': 'DEBUG',
             'class': 'logging.FileHandler',
-            'filename': join(LOG_DIR, 'fpiweb.log'),
+            'filename': 'fpiweb.log',
             'formatter': 'standard',
         }
     },

@@ -20,7 +20,7 @@ __creation_date__ = "04/01/2019"
 
 month_choices = [(None, '--')] + [(str(i), str(i)) for i in range(1, 13)]
 
-# logger = getLogger(__name__)
+logger = getLogger('fpiweb')
 
 
 def expire_year_choices():
@@ -93,40 +93,42 @@ class ConstraintsForm(forms.ModelForm):
                   'constraint_list']
 
 
-class BoxForm(forms.ModelForm):
+class NewBoxForm(forms.ModelForm):
     class Meta:
         model = Box
         fields = [
             'box_number',
             'box_type',
-            'loc_row',
-            'loc_bin',
-            'loc_tier',
+        ]
+
+    box_number = forms.CharField(
+        max_length=Box.box_number_max_length,
+        min_length=Box.box_number_min_length,
+        required=False,
+        disabled=True
+    )
+
+    def save(self, commit=True):
+        if self.instance and not self.instance.pk:
+            if self.instance.box_type:
+                box_type = self.instance.box_type
+                self.instance.quantity = box_type.box_type_qty
+        return super(NewBoxForm, self).save(commit=commit)
+
+
+class FillBoxForm(forms.ModelForm):
+    class Meta:
+        model = Box
+        fields = [
             'product',
             'exp_year',
             'exp_month_start',
             'exp_month_end',
             'date_filled',
-            'quantity'
         ]
         widgets = {
             'date_filled': Html5DateInput
         }
-
-    loc_row = forms.ChoiceField(
-        choices=row_choices,
-        help_text=Box.loc_row_help_text,
-    )
-
-    loc_bin = forms.ChoiceField(
-        choices=bin_choices,
-        help_text=Box.loc_bin_help_text,
-    )
-
-    loc_tier = forms.ChoiceField(
-        choices=tier_choices,
-        help_text=Box.loc_tier_help_text,
-    )
 
     exp_year = forms.TypedChoiceField(
         choices=expire_year_choices,
@@ -168,12 +170,34 @@ class BoxForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        print("cleaned_data", cleaned_data)
-
         exp_month_start = cleaned_data.get('exp_month_start')
         exp_month_end = cleaned_data.get('exp_month_end')
         self.validate_exp_month_start_end(exp_month_start, exp_month_end)
 
+
+class MoveBoxForm(forms.ModelForm):
+    class Meta:
+        model = Box
+        fields = [
+            'loc_row',
+            'loc_bin',
+            'loc_tier',
+        ]
+
+    loc_row = forms.ChoiceField(
+        choices=row_choices,
+        help_text=Box.loc_row_help_text,
+    )
+
+    loc_bin = forms.ChoiceField(
+        choices=bin_choices,
+        help_text=Box.loc_bin_help_text,
+    )
+
+    loc_tier = forms.ChoiceField(
+        choices=tier_choices,
+        help_text=Box.loc_tier_help_text,
+    )
 
 
 # EOF

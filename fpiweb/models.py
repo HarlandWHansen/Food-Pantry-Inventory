@@ -3,8 +3,13 @@ models.py - Define the database tables using ORM models.
 """
 from enum import Enum, unique
 
+# import as to avoid conflict with built-in function compile
+from re import compile as re_compile
+
 from django.db import models
+from django.db.models import Max
 from django.utils import timezone
+from django.urls import reverse
 
 __author__ = '(Multiple)'
 __project__ = "Food-Pantry-Inventory"
@@ -148,6 +153,29 @@ class Product(models.Model):
         return display
 
 
+class BoxNumber:
+
+    box_number_regex = re_compile(r'^BOX\d{5}$')
+
+    @staticmethod
+    def format_box_number(int_box_number):
+        return "BOX{:05}".format(int_box_number)
+
+    @staticmethod
+    def get_next_box_number():
+        max_box_number = Box.objects.aggregate(max_box_number=Max('box_number'))
+        max_box_number = max_box_number.get('max_box_number')
+        if max_box_number is None:
+            return BoxNumber.format_box_number(1)
+        max_box_number = int(max_box_number[3:])
+
+        return BoxNumber.format_box_number(max_box_number + 1)
+
+    @staticmethod
+    def validate(box_number):
+        return bool(BoxNumber.box_number_regex.match(box_number))
+
+
 class Box(models.Model):
     """
     Box or container for product.
@@ -167,9 +195,11 @@ class Box(models.Model):
     """ Internal record identifier for box. """
 
     box_number_help_text = "Number printed in the label on the box."
+    box_number_max_length = 8
+    box_number_min_length = box_number_max_length
     box_number = models.CharField(
         'Visible Box Number',
-        max_length=8,
+        max_length=box_number_max_length,
         unique=True,
         help_text=box_number_help_text,
     )
@@ -290,6 +320,23 @@ class Box(models.Model):
                 f'{self.exp_year} {self.date_filled}'
         return display
 
+    def empty(self):
+
+        # TODO: finish creating activity record
+        Activity.objects.create(
+            box_number=self.box_number,
+            box_type=self.box_type,
+
+        )
+
+        # TODO: clear out location and product info
+
+    def get_absolute_url(self):
+        return reverse(
+            'fpiweb:box_details',
+            kwargs={'pk': self.pk},
+        )
+
 
 class Activity(models.Model):
     """
@@ -394,8 +441,9 @@ class Activity(models.Model):
     )
     """ Year product would have expired. """
 
-    exp_month_start_help_text = \
+    exp_month_start_help_text = (
         'Optional starting month product would have expired.'
+    )
     exp_month_start = models.IntegerField(
         'Start Expiration Month',
         null=True,
@@ -404,8 +452,9 @@ class Activity(models.Model):
     )
     """ Optional starting month product would have expired. """
 
-    exp_month_end_help_text = \
+    exp_month_end_help_text = (
         'Optional ending month product would have expired.'
+    )
     exp_month_end = models.IntegerField(
         'End Expiration Month',
         null=True,
@@ -427,17 +476,19 @@ class Activity(models.Model):
     def __str__(self):
         """ Default way to display this activity record. """
         if self.date_filled:
-            display = f'{self.box_number} ({self.box_type}) ' \
-                f'{self.prod_name} ({self.prod_cat_name}) ' \
-                f'{self.quantity} ' \
-                f'{self.exp_year}' \
-                f'({self.exp_month_start}-' \
-                f'{self.exp_month_end})' \
-                f'{self.date_filled} - {self.date_consumed}' \
-                f'({self.duration}) at ' \
-                f'{self.loc_row} / ' \
-                f'{self.loc_bin} / ' \
+            display = (
+                f'{self.box_number} ({self.box_type}) ' 
+                f'{self.prod_name} ({self.prod_cat_name}) ' 
+                f'{self.quantity} ' 
+                f'{self.exp_year}' 
+                f'({self.exp_month_start}-' 
+                f'{self.exp_month_end})' 
+                f'{self.date_filled} - {self.date_consumed}' 
+                f'({self.duration}) at ' 
+                f'{self.loc_row} / ' 
+                f'{self.loc_bin} / ' 
                 f'{self.loc_tier}'
+            )
         else:
             display = f'{self.box_number} ({self.box_type}) - Empty'
         return display

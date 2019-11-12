@@ -110,10 +110,10 @@ Setting Up Your Personal Repository
 #.  Start PyCharm.  (If you have other projects open, please close them for
     the moment.)
 
-#.  Choose "Checkout from Verson Control" from the right side of the dialog
-    presentd by PyCharm.
+#.  Choose "Checkout from Version Control" from the right side of the dialog
+    presented by PyCharm.
 
-#.  Paste the URL saved about into the URL box provided.
+#.  Paste the URL saved above into the URL box provided.
 
 #.  Click on the "Test" button to verify that you have the correct URL to
     access your public repository on GitHub.
@@ -138,8 +138,8 @@ Setting Up Your Personal Repository
 
     #.  Click on Add in the dropdown.
 
-    #.  Verify that "Virtual Environmemt" is highlighted on the far left of
-        the dialog the comes up, and that the "New Environment" radio button
+    #.  Verify that "Virtual Environment" is highlighted on the far left of
+        the dialog that comes up, and that the "New Environment" radio button
         has been selected.
 
     #.  Choose Python 3.7 as the base interpreter.  (If 3.7 is not
@@ -230,7 +230,7 @@ Make Local Changes
     **VCS -> Git -> Commit Directory...** to bring up the commit
     dialog.
 
-#.  Add a commit mesage.
+#.  Add a commit message.
 
     #.  The first line should be a summary of the change and be less than 72
         characters long.
@@ -329,7 +329,7 @@ Update Your Public Repository To Match The Main Repository (both On GitHub)
 
 #.  Switch to the master branch.
 
-#.  Issue the following from the Terminal window or do the equvalent from
+#.  Issue the following from the Terminal window or do the equivalent from
     PyCharm.
 
     ::
@@ -342,7 +342,7 @@ Update Your Public Repository To Match The Main Repository (both On GitHub)
         and your personal master branch.  It then automatically commits those
         changes to your personal repository.
 
-    #.  The second command pushs those same changes up to your public
+    #.  The second command pushes those same changes up to your public
         repository.
 
 Here is a graphical representation of this process showing the steps involved.

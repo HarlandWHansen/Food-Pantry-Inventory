@@ -13,7 +13,7 @@ Main Repository (on GitHub)
     The main repository is located on GitHub at
     https://github.com/w-a-r-m-inventory-system/Food-Pantry-Inventory.
     This repository is the ultimate target of all changes.  Currently it is
-    managed by Shelby Elzinger.
+    managed by Shelby Elzinga.
 
 Public Repository (on GitHub)
     This is **your** public repository.  It is also located on GitHub at an

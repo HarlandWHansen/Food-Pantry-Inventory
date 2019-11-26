@@ -125,7 +125,7 @@ include changing which product is associated with it.
 **T3: Modify base.html template to use static files**
 -----------------------------------------------------
 
-Currently, when the we site is first presented to the user, the code
+Currently, when the web site is first presented to the user, the code
 downloads the bootstrap css and javascript.  The code needs to be changed so
 that any css and javascript are already stored in the static files and
 folders in the Django instance so there no need to access any other sites

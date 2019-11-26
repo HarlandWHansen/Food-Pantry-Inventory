@@ -42,7 +42,7 @@ Instructions for Use
     *   Note, the program will automatically skip over any box numbers
         already in use.
 
-#.  Obtain the "URL prefix" necessary from the system adminsitrators.
+#.  Obtain the "URL prefix" necessary from the system administrators.
 
 #.  Choose a file name for the PDF document.
 

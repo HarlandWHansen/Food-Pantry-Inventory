@@ -381,7 +381,6 @@ fabric.properties
 # Ignore data for now
 work/
 data/
-
 # Ignore private settings
 /FPIDjango/private/
 

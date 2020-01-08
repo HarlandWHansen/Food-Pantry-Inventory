@@ -472,13 +472,35 @@ class Box(models.Model):
     )
     """ Type of box with this number. """
 
-    location = models.ForeignKey(
-        "Location",
+    loc_row_help_text = 'Row containing this box, if filled.'
+    loc_row = models.CharField(
+        'Row Location',
+        max_length=2,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
-        help_text="Location of Box"
+        help_text=loc_row_help_text,
     )
+    """ Row containing this box, if filled. """
+
+    loc_bin_help_text = 'Bin containing this box, if filled.'
+    loc_bin = models.CharField(
+        'Bin Location',
+        max_length=2,
+        null=True,
+        blank=True,
+        help_text=loc_bin_help_text,
+    )
+    """ Bin containing this box, if filled. """
+
+    loc_tier_help_text = 'Tier containing this box, if filled.'
+    loc_tier = models.CharField(
+        'Tier Location',
+        max_length=2,
+        null=True,
+        blank=True,
+        help_text=loc_tier_help_text,
+    )
+    """ Tier containing this box, if filled. """
 
     product_help_text = 'Product contained in this box, if filled.'
     product = models.ForeignKey(
@@ -550,6 +572,7 @@ class Box(models.Model):
         if self.exp_month_start or self.exp_month_end:
             display = (
                 f'{self.box_number} ({self.box_type}) '
+                f'{self.loc_row}/{self.loc_bin}/{self.loc_tier} '
                 f'{self.product} {self.quantity}'
                 f'{self.exp_year} '
                 f'({self.exp_month_start}-{self.exp_month_end})'
@@ -558,6 +581,7 @@ class Box(models.Model):
         else:
             display = (
                 f'{self.box_number} ({self.box_type}) '
+                f'{self.loc_row}/{self.loc_bin}/{self.loc_tier} '
                 f'{self.product} {self.quantity}'
                 f'{self.exp_year} {self.date_filled}'
             )
@@ -878,6 +902,15 @@ class Activity(models.Model):
         help_text=date_consumed_help_text,
     )
     """ Date product was consumed. """
+
+    duration_help_text = (
+        'Number of days between date box was filled and consumed.'
+    )
+    duration = models.IntegerField(
+        'Duration',
+        help_text=duration_help_text,
+    )
+    """ Number of days between date box was filled and consumed. """
 
     exp_year_help_text = 'Year product would have expired.'
     exp_year = models.IntegerField(
@@ -1203,11 +1236,12 @@ class Profile(models.Model):
         help_text=active_location_help_text,
     )
 
-    def __str__(self) -> str:
-        """ display profile information """
-        display = f'User: {self.user} - {self.title}'
-        if self.active_location:
-            display += f' pallet for {self.active_location}'
-        return display
+
+class Action:
+    ACTION_BUILD_PALLET = 'build_pallet'
+    ACTIONS = {
+        ACTION_BUILD_PALLET,
+    }
+
 
 # EOF

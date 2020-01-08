@@ -20,7 +20,9 @@ from fpiweb.views import \
     BuildPalletView, \
     IndexView, \
     LoginView, \
+    ConstraintsListView, \
     ConstraintCreateView, \
+    ConstraintUpdateView, \
     ConstraintDeleteView, \
     ConstraintsListView, \
     ConstraintUpdateView, \

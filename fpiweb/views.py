@@ -21,10 +21,15 @@ from django.http import \
     JsonResponse, \
     StreamingHttpResponse
 from django.shortcuts import redirect, render
+
 from django.urls import reverse, reverse_lazy
 from django.views import View
 from django.views.generic import \
+    TemplateView, \
+    ListView, \
+    DetailView, \
     CreateView, \
+    UpdateView, \
     DeleteView, \
     DetailView, \
     FormView, \
@@ -244,6 +249,15 @@ class LocBinCreateView(LoginRequiredMixin, CreateView):
 
     fields = ['loc_bin', 'loc_bin_descr', ]
 
+    def get_success_url(self):
+        """
+        Run once form is successfully validated.
+
+        :return:
+        """
+        results = reverse('fpiweb:loc_bin_view')
+        return results
+
 
 class LocBinUpdateView(LoginRequiredMixin, UpdateView):
     """
@@ -269,6 +283,15 @@ class LocBinUpdateView(LoginRequiredMixin, UpdateView):
         context['action'] = reverse('fpiweb:loc_bin_update',
                                     kwargs={'pk': self.get_object().id})
         return context
+
+    def get_success_url(self):
+        """
+        Set the next URL to use once the edit is successful.
+        :return:
+        """
+
+        results = reverse('fpiweb:loc_bin_view')
+        return results
 
 
 class LocBinDeleteView(LoginRequiredMixin, DeleteView):
@@ -423,6 +446,15 @@ class ConstraintCreateView(LoginRequiredMixin, CreateView):
     fields = ['constraint_name', 'constraint_descr', 'constraint_type',
               'constraint_min', 'constraint_max', 'constraint_list', ]
 
+    def get_success_url(self):
+        """
+        Run once form is successfully validated.
+
+        :return:
+        """
+        results = reverse('fpiweb:constraints_view')
+        return results
+
 
 class ConstraintUpdateView(LoginRequiredMixin, UpdateView):
     """
@@ -482,6 +514,15 @@ class ConstraintDeleteView(LoginRequiredMixin, DeleteView):
         context['action'] = reverse('fpiweb:constraint_delete',
                                     kwargs={'pk': self.get_object().id})
         return context
+
+    def get_success_url(self):
+        """
+        Set the next URL to use once the delete is successful.
+        :return:
+        """
+
+        results = reverse('fpiweb:constraints_view')
+        return results
 
 
 class BoxNewView(LoginRequiredMixin, View):

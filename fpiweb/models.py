@@ -613,6 +613,7 @@ class Box(models.Model):
         Activity.objects.create(
             box_number=self.box_number,
             box_type=self.box_type,
+
         )
 
         # TODO: clear out location and product info

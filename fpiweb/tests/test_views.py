@@ -4,12 +4,49 @@ __project__ = "Food-Pantry-Inventory"
 __creation_date__ = "04/01/2019"
 
 from bs4 import BeautifulSoup
+from datetime import date
 
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 
-from fpiweb.models import Box, BoxNumber, BoxType
+from fpiweb.forms import \
+    ExtantBoxNumberForm, \
+    ExistingLocationForm
+from fpiweb.models import \
+    Box, \
+    BoxNumber, \
+    BoxType, \
+    Location, \
+    LocRow, \
+    LocBin, \
+    LocTier, \
+    Product
+from fpiweb.views import ManualMoveBoxView
+
+
+def management_form_post_data(
+        prefix,
+        total_forms,
+        initial_forms=0,
+        min_num_forms=0,
+        max_num_forms=100):
+    post_data = {
+        'TOTAL_FORMS': total_forms,
+        'INITIAL_FORMS': initial_forms,
+        'MIN_NUM_FORMS': min_num_forms,
+        'MAX_NUM_FORMS': max_num_forms,
+    }
+    return {f'{prefix}-{k}': v for k, v in post_data.items()}
+
+
+def formset_form_post_data(prefix, form_index, form_data):
+    form_data_out = {}
+    for key, value in form_data.items():
+        key = f'{prefix}-{form_index}-{key}'
+        form_data_out[key] = value
+    return form_data_out
 
 
 class BoxNewViewTest(TestCase):
@@ -163,3 +200,222 @@ class LogoutViewTest(TestCase):
         client = Client()
         response = client.get(reverse('fpiweb:logout'))
         self.assertEqual(200, response.status_code)
+
+
+class BuildPalletViewTest(TestCase):
+
+    fixtures = (
+        'Location',
+        'LocRow',
+        'LocBin',
+        'LocTier',
+        'Product',
+        'ProductCategory',
+        'Box',
+        'BoxType'
+    )
+
+    def test_post(self):
+        user = User.objects.create_user(
+            'aturing',
+            'aturing@example.com',
+            'abc123',
+        )
+
+        client = Client()
+        client.force_login(user)
+
+        # Pick a specific Location
+        location = Location.objects.get(
+            loc_row__loc_row='01',
+            loc_bin__loc_bin='02',
+            loc_tier__loc_tier='A1',
+        )
+
+        number_of_boxes = 3
+
+        # Get 3 boxes that AREN'T in that Location
+        boxes = Box.objects.exclude(location=location)[:number_of_boxes]
+
+        # choose a product that isn't in any of the boxes
+        product = Product.objects \
+            .exclude(pk__in=[b.product.pk for b in boxes]) \
+            .first()
+
+        exp_year = date.today().year + 3
+
+        formset_prefix = 'box_forms'
+        post_data =  {
+            'loc_row': location.loc_row.pk,
+            'loc_bin': location.loc_bin.pk,
+            'loc_tier': location.loc_tier.pk,
+        }
+        post_data.update(
+            management_form_post_data(formset_prefix, number_of_boxes)
+        )
+
+        for i, box in enumerate(boxes):
+            box_data = {
+                'id': box.id,
+                'box_number': box.box_number,
+                'product': product.pk,
+                'exp_year': exp_year,
+            }
+
+            # set exp month start and end
+            if i == 0:
+                box_data['exp_month_start'] = 3
+                box_data['exp_month_end'] = 6
+
+            box_data = formset_form_post_data('box_forms', i, box_data)
+            post_data.update(box_data)
+
+        # convert all the values to strings
+        post_data = {k: str(v) for k, v in post_data.items()}
+
+        response = client.post(
+            reverse('fpiweb:build_pallet'),
+            post_data,
+        )
+        self.assertEqual(200, response.status_code)
+
+        for i, box in enumerate(boxes):
+            box.refresh_from_db()
+
+            self.assertEqual(product, box.product)
+            self.assertEqual(location, box.location)
+            self.assertEqual(exp_year, box.exp_year)
+
+            if i == 0:
+                self.assertEqual(3, box.exp_month_start)
+                self.assertEqual(6, box.exp_month_end)
+
+
+class ManualMoveBoxViewTest(TestCase):
+
+    fixtures = (
+        'BoxType',
+        'ProductCategory',
+        'Product',
+        'LocRow',
+        'LocBin',
+        'LocTier',
+        'Location',
+    )
+
+    url = reverse_lazy('fpiweb:manual_move_box')
+
+    def test_get(self):
+        user = User.objects.create_user('jdoe3', 'jdoe2@foo.com', 'abc123')
+
+        client = Client()
+        client.force_login(user)
+
+        response = client.get(self.url)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            ManualMoveBoxView.MODE_ENTER_BOX_NUMBER,
+            response.context.get('mode'),
+        )
+
+        box_number_form = response.context.get('box_number_form')
+        self.assertIsInstance(box_number_form, ExtantBoxNumberForm)
+        self.assertIsNone(response.context['box'])
+        self.assertIsNone(response.context['location_form'])
+        self.assertIsNone(response.context['errors'])
+
+    def test_post_box_number_form(self):
+        user = User.objects.create_user('jdoe4', 'jdoe4@foo.com', 'abc123')
+
+        client = Client()
+        client.force_login(user)
+
+        box_number = BoxNumber.get_next_box_number()
+
+        response = client.post(
+            self.url,
+            {
+                'mode': ManualMoveBoxView.MODE_ENTER_BOX_NUMBER,
+                'box_number': box_number
+            },
+        )
+        self.assertEqual(404, response.status_code)
+        self.assertEqual(
+            ManualMoveBoxView.MODE_ENTER_BOX_NUMBER,
+            response.context['mode'],
+        )
+        self.assertIsInstance(
+            response.context['box_number_form'],
+            ExtantBoxNumberForm,
+        )
+
+        box = Box.objects.create(
+            box_number=box_number,
+            box_type=BoxType.objects.get(box_type_code='Evans'),
+            product=Product.objects.get(prod_name='Canned Potatoes'),
+        )
+
+        # response = client.post(
+        #     self.url,
+        #     {
+        #         'mode': ManualMoveBoxView.MODE_ENTER_BOX_NUMBER,
+        #         'box_number': box_number
+        #     }
+        # )
+        # self.assertEqual(200, response.status_code)
+        # self.assertEqual(
+        #     ManualMoveBoxView.MODE_ENTER_LOCATION,
+        #     response.context['mode'],
+        # )
+        # self.assertEqual(
+        #     response.context['box'].box_number,
+        #     box.box_number
+        # )
+        # self.assertIsInstance(
+        #     response.context['location_form'],
+        #     ExistingLocationForm,
+        # )
+
+    def test_post_location_form(self):
+        user = User.objects.create_user('jdoe5', 'jdoe5@foo.com', 'abc123')
+
+        client = Client()
+        client.force_login(user)
+
+        box = Box.objects.create(
+            box_number=BoxNumber.get_next_box_number(),
+            box_type=BoxType.objects.get(box_type_code='Evans'),
+            product=Product.objects.get(prod_name='Canned Potatoes'),
+            date_filled=timezone.now(),
+            exp_year=2022,
+            quantity=0,
+        )
+        self.assertIsNone(box.location)
+
+        location = Location.objects.first()
+
+        response = client.post(
+            self.url,
+            {
+                'mode': ManualMoveBoxView.MODE_ENTER_LOCATION,
+                'loc_row': location.loc_row_id,
+                'loc_bin': location.loc_bin_id,
+                'loc_tier': location.loc_tier_id,
+                'box_pk': box.pk,
+            }
+        )
+
+        self.assertEqual(200, response.status_code, response.content)
+
+        context_box = response.context.get('box')
+        self.assertIsNotNone(context_box)
+        self.assertEqual(
+            box.pk,
+            context_box.pk,
+        )
+        self.assertEqual(
+            location.pk,
+            context_box.location.pk,
+        )
+
+

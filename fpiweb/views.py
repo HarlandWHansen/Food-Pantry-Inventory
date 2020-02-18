@@ -1,8 +1,10 @@
 """
 views.py - establish the views (pages) for the F. P. I. web application.
 """
+
+from collections import OrderedDict
 from csv import writer as csv_writer
-from enum import Enum, auto
+from enum import Enum
 from io import BytesIO
 from json import loads
 from logging import getLogger, debug, info
@@ -14,7 +16,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.serializers import serialize
 from django.db.models import Max
-from django.forms import modelformset_factory
+from django.forms import formset_factory
 from django.http import \
     FileResponse, \
     HttpResponse, \
@@ -23,6 +25,7 @@ from django.http import \
 from django.shortcuts import redirect, render
 
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.views import View
 from django.views.generic import \
     TemplateView, \
@@ -36,6 +39,7 @@ from django.views.generic import \
     ListView, \
     TemplateView, \
     UpdateView
+
 from sqlalchemy.engine.url import URL
 
 from fpiweb.models import \
@@ -47,6 +51,7 @@ from fpiweb.models import \
     LocBin, \
     LocTier, \
     Pallet, \
+    Product, \
     Profile, \
     Location, \
     PalletBox
@@ -55,19 +60,25 @@ from fpiweb.code_reader import \
     read_box_number
 from fpiweb.forms import \
     BoxItemForm, \
+    ExtantBoxNumberForm, \
     BuildPalletForm, \
     ConstraintsForm, \
+    ExistingLocationForm, \
     LocRowForm, \
     LocBinForm, \
     LocTierForm, \
     LoginForm, \
     NewBoxForm, \
     PrintLabelsForm
+from fpiweb.support.BoxActivity import BoxActivityClass
 from fpiweb.qr_code_utilities import QRCodePrinter
+from fpiweb.support.BoxActivity import BoxActivityClass
 
 __author__ = '(Multiple)'
 __project__ = "Food-Pantry-Inventory"
 __creation_date__ = "04/01/2019"
+
+from fpiweb.support.BoxManagement import BoxManagementClass
 
 logger = getLogger('fpiweb')
 
@@ -602,7 +613,7 @@ class BoxDetailsView(LoginRequiredMixin, DetailView):
     context_object_name = 'box'
 
     def get_context_data(self, **kwargs):
-        debug(f"kwargs are {kwargs}")
+        logger.debug(f"kwargs are {kwargs}")
         context = super().get_context_data(**kwargs)
         return context
 
@@ -698,52 +709,165 @@ class TestScanView(LoginRequiredMixin, TemplateView):
 
 class BuildPalletView(View):
     """Set action in view"""
-    template_name = 'fpiweb/build_pallet.html'
+    form_template = 'fpiweb/build_pallet.html'
+    confirmation_template = 'fpiweb/build_pallet_confirmation.html'
+    formset_prefix = 'box_forms'
 
-    BoxFormFactory = modelformset_factory(
-        Box,
-        form=BoxItemForm,
+    BoxFormFactory = formset_factory(
+        BoxItemForm,
         extra=0,
     )
 
+    def show_forms_response(
+            self,
+            request,
+            build_pallet_form,
+            box_forms,
+            status=400):
+
+        return render(
+            request,
+            self.form_template,
+            {
+                'form': build_pallet_form,
+                'box_forms': box_forms,
+            },
+            status=status,
+        )
+
     def get(self, request, *args, **kwargs):
 
+        # When adding a box to an existing pallet a box number is passed
+        # as part of the URL
         box_pk = kwargs.get('box_pk')
 
         build_pallet_form = BuildPalletForm()
 
         kwargs = {
-            'prefix': 'box_forms',
+            'prefix': self.formset_prefix,
         }
         if box_pk:
-            kwargs['queryset'] = Box.objects.filter(pk=box_pk)
-        else:
-            kwargs['queryset'] = Box.objects.none()
+            raise NotImplementedError(
+                "Adding box to existing pallet not implemented")
 
-        box_forms = self.BoxFormFactory(**kwargs)
-
-        context = {
-            'form': build_pallet_form,
-            'box_forms': box_forms,
-        }
-        return render(request, self.template_name, context)
+        return self.show_forms_response(
+            request,
+            build_pallet_form,
+            self.BoxFormFactory(**kwargs),
+            status=200,
+        )
 
     def post(self, request):
 
-        form = BuildPalletForm(request.POST)
-        box_forms = self.BoxFormFactory(request.POST, prefix='box_forms')
+        logger.debug(f"POST data is {request.POST}")
+        build_pallet_form = BuildPalletForm(request.POST)
+        box_forms = self.BoxFormFactory(
+            request.POST,
+            prefix=self.formset_prefix,
+        )
 
-        if not form.is_valid() or not box_forms.is_valid():
-            return render(
+        build_pallet_form_valid = build_pallet_form.is_valid()
+        if not build_pallet_form_valid:
+            logger.debug("BuildPalletForm not valid")
+
+        box_forms_valid = box_forms.is_valid()
+        if not box_forms_valid:
+            logger.debug("BoxForms not valid")
+
+        if not all([build_pallet_form_valid, box_forms_valid]):
+            return self.show_forms_response(
                 request,
-                self.template_name,
-                {
-                    'form': form,
-                    'box_forms': box_forms,
-                }
+                build_pallet_form,
+                box_forms,
             )
 
-        return error_page(request, "forms are valid")
+        location = build_pallet_form.instance
+
+        # Update box records and
+        boxes_by_id = OrderedDict()
+        duplicate_ids = set()
+        box_ids_not_found = set()
+        forms_missing_box_id = 0
+        for i, box_form in enumerate(box_forms):
+            cleaned_data = box_form.cleaned_data
+            if not cleaned_data:
+                continue
+
+            box_id = cleaned_data.get('id')
+            if not isinstance(box_id, int):
+                logger.error(f"box_id {box_id} is a {type(box_id)}")
+                continue
+
+            # Is this a duplicate box_id?
+            if box_id in boxes_by_id:
+                duplicate_ids.add(box_id)
+                continue
+
+            # Is box_id present in database?
+            try:
+                box = Box.objects.get(id=box_id)
+            except Box.DoesNotExist:
+                box_ids_not_found.add(box_id)
+                continue
+
+            boxes_by_id[box_id] = box
+
+            box.location = location
+            box.product = cleaned_data.get('product')
+            box.exp_year = cleaned_data.get('exp_year')
+            box.exp_month_start = cleaned_data.get('exp_month_start')
+            box.exp_month_end = cleaned_data.get('exp_month_end')
+
+            # Not having a date_filled causes an error if an activity
+            # record needs to be created.
+            if not box.date_filled:
+                box.date_filled = timezone.now()
+
+            box.save()
+
+            box_activity = BoxActivityClass()
+            box_activity.box_move(box.id)
+
+        if forms_missing_box_id > 0:
+            # error reported on box_form
+            logger.debug("forms_missing_box_id > 0")
+            return self.show_forms_response(
+                request,
+                build_pallet_form,
+                box_forms,
+            )
+
+        if duplicate_ids:
+            duplicate_ids = list(duplicate_ids)
+            message = f"Duplicate Box IDs: {', '.join(duplicate_ids)}"
+            logger.debug(message)
+            build_pallet_form.add_error(None, message)
+            return self.show_forms_response(
+                request,
+                build_pallet_form,
+                box_forms,
+            )
+
+        if box_ids_not_found:
+            box_ids_not_found = list(box_ids_not_found)
+            logger.debug("box_ids_not_found are {}".format(box_ids_not_found))
+            message = f"Box IDs not found: {', '.join(box_ids_not_found)}"
+            logger.debug(message)
+            build_pallet_form.add_error(None, message)
+            return self.show_forms_response(
+                request,
+                build_pallet_form,
+                box_forms,
+            )
+
+        return render(
+            request,
+            self.confirmation_template,
+            {
+                'location': location,
+                'boxes': boxes_by_id.values(),
+            },
+        )
 
 
 class ScannerViewError(RuntimeError):
@@ -813,6 +937,10 @@ class ScannerView(View):
                 'quantity': default_box_type.box_type_qty,
             }
         )
+        if created:
+            logger.info(f"Box with box number {box_number} created.")
+        else:
+            logger.info(f"Found box with box number {box_number}.")
         return box, created
 
     @staticmethod
@@ -907,7 +1035,9 @@ class BoxItemFormView(LoginRequiredMixin, View):
 
     @staticmethod
     def get_form(box, prefix=None):
-        kwargs = {'instance': box}
+        kwargs = {
+            'initial': BoxItemForm.get_initial_from_box(box)
+        }
         if prefix:
             kwargs['prefix'] = prefix
         form = BoxItemForm(**kwargs)
@@ -932,6 +1062,7 @@ class BoxItemFormView(LoginRequiredMixin, View):
             request,
             self.template_name,
             {
+                'box_number': box.box_number,
                 'form': self.get_form(box, prefix),
             },
         )
@@ -958,16 +1089,16 @@ class ManualMenuView(TemplateView):
         current_user = self.request.user
         profile = current_user.profile
         if profile:
-            active_pallet = profile.active_location_id
+            active_pallet = profile.active_pallet
         else:
             active_pallet = None
 
         # does user have active pallet?  if so get info
         if active_pallet:
             new_target = None
-            pallet_rec = Pallet.objects.select_related().get(
-                user_id_id=current_user.id)
-            pallet_id = pallet_rec.id
+            # pallet_rec = Pallet.objects.select_related().get(
+            #     id=profile.active_pallet)
+            pallet_id = active_pallet.id
             pallet_target = reverse_lazy(
                 'fpiweb:manual_pallet_status', args=[pallet_id]
             )
@@ -1137,7 +1268,7 @@ class ManualPalletStatus(LoginRequiredMixin, ListView):
     context_object_name = 'manual_pallet_status'
     success_url = reverse_lazy('fpiweb:manual_menu')
 
-    def get_context_data(self, **kwargs):
+    def get_(self, **kwargs):
         """
         Add Site Information to About page.
 
@@ -1146,34 +1277,39 @@ class ManualPalletStatus(LoginRequiredMixin, ListView):
         """
 
         # get stuff from the request
-        context = super(ManualPalletStatus, self).get_context_data(**kwargs)
+        context = super().get_context_data(**kwargs)
 
         # get related stuff from the database
-        pallet_rec = context['manual_pallet_status'].get()
-        pallet_user_id = pallet_rec.user_id_id
-        profile_rec = Profile.objects.get(user_id=pallet_user_id)
-        active_location_id = profile_rec.active_location_id
-        location_rec = Location.objects.get(id=active_location_id)
-        location_row_id = location_rec.loc_row.id
-        row_descr = location_rec.loc_row.loc_row_descr
-        location_bin_id = location_rec.loc_bin.id
-        bin_descr = location_rec.loc_bin.loc_bin_descr
-        location_tier_id = location_rec.loc_tier.id
-        tier_descr = location_rec.loc_tier.loc_tier_descr
-        box_set = PalletBox.objects.filter(
-            pallet_id_id=pallet_rec.id).order_by('box_number')
+        current_user = self.request.user
+        profile_rec = Profile.objects.get(user_id=current_user.id)
+        if profile_rec.active_pallet:
+            pallet_rec = Pallet.objects.select_related(
+                'location',
+                'location__loc_row',
+                'location__loc_bin',
+                'location__loc_tier',
+            ).get(id=profile_rec.active_pallet)
+            location_rec = pallet_rec.location
+            loc_row_rec = location_rec.loc_row
+            loc_bin_rec = location_rec.loc_bin
+            loc_tier_rec = location_rec.loc_tier
+            box_set = PalletBox.objects.filter(
+                pallet_id=pallet_rec.id).order_by('box_number')
+        else:
+            pallet_rec = None
+            location_rec = None
+            loc_row_rec = None
+            loc_bin_rec = None
+            loc_tier_rec = None
+            box_set = None
 
-        # pallet_context = context['manual_pallet_status']
-        # pallet_query = pallet_context.query
-        warehouse_flag = location_rec.loc_in_warehouse
-        # remove entires below before production
-        context['warehouse_flag'] = warehouse_flag
-        context['row_id'] = location_row_id
-        context['row_descr'] = row_descr
-        context['bin_id'] = location_bin_id
-        context['bin_descr'] = bin_descr
-        context['tier_id'] = location_tier_id
-        context['tier_descr'] = tier_descr
+        context['user'] = current_user
+        context['profile'] = profile_rec
+        context['active_pallet'] = pallet_rec
+        context['location'] = location_rec
+        context['loc_row'] = loc_row_rec
+        context['loc_bin'] = loc_bin_rec
+        context['loc_tier'] = loc_tier_rec
         context['box_set'] = box_set
         return context
 
@@ -1246,5 +1382,138 @@ class ActivityDownloadView(LoginRequiredMixin, View):
         response['Content-Disposition'] = 'attachment; filename="activities.csv"'
         return response
 
+
+class ManualMoveBoxView(LoginRequiredMixin, View):
+    template_name = 'fpiweb/manual_move_box.html'
+
+    MODE_ENTER_BOX_NUMBER = 'enter_box_number'
+    MODE_ENTER_LOCATION = 'enter_location'
+    MODE_CONFIRMATION = 'confirmation'
+
+    @staticmethod
+    def build_context(
+            mode,
+            box_number_form=None,
+            box=None,
+            location_form=None,
+            errors=None):
+        return {
+            'mode': mode,
+            'box_number_form': box_number_form,
+            'box': box,
+            'location_form': location_form,
+            'view_class': ManualMoveBoxView,
+            'errors': errors,
+        }
+
+    def get(self, request, *args, **kwargs):
+        context = self.build_context(
+            self.MODE_ENTER_BOX_NUMBER,
+            ExtantBoxNumberForm(),
+        )
+        return render(request, self.template_name, context)
+
+    def post_box_number(self, request):
+        box_number_form = ExtantBoxNumberForm(request.POST)
+        if not box_number_form.is_valid():
+            context = self.build_context(
+                self.MODE_ENTER_BOX_NUMBER,
+                box_number_form,
+            )
+            return render(
+                request,
+                self.template_name,
+                context,
+                status=404,
+            )
+
+        box_number = box_number_form.cleaned_data.get('box_number')
+
+        boxes = Box.select_location(
+            Box.objects.filter(box_number=box_number)
+        )
+
+        return render(
+            request,
+            self.template_name,
+            self.build_context(
+                self.MODE_ENTER_LOCATION,
+                box=boxes.first(),
+                location_form=ExistingLocationForm(),
+            )
+        )
+
+    def post_location(self, request):
+        box_pk = request.POST.get('box_pk')
+        if not box_pk:
+            return render(
+                request,
+                self.template_name,
+                self.build_context(
+                    self.MODE_ENTER_BOX_NUMBER,
+                    errors=['Missing box_pk']
+                ),
+                status=400,
+            )
+
+        try:
+            box = Box.objects.get(pk=box_pk)
+        except Box.DoesNotExist as dne:
+            message = str(dne)
+            logger.error(message)
+            return render(
+                request,
+                self.template_name,
+                self.build_context(
+                    self.MODE_ENTER_BOX_NUMBER,
+                    errors=[message]
+                ),
+                status=404,
+            )
+
+        location_form = ExistingLocationForm(request.POST)
+        if not location_form.is_valid():
+            return render(
+                request,
+                self.template_name,
+                self.build_context(
+                    self.MODE_ENTER_LOCATION,
+                    box=box,
+                    location_form=location_form,
+                ),
+            )
+
+        location = location_form.cleaned_data.get('location')
+        if not location:
+            message = "Unable to retrieve location from form"
+            logger.error(message)
+            return render(
+                render,
+                self.template_name
+            )
+
+        box.location = location
+        box.save()
+
+        box_activity = BoxActivityClass()
+        box_activity.box_move(box_pk)
+
+        return render(
+            request,
+            self.template_name,
+            self.build_context(
+                self.MODE_CONFIRMATION,
+                box=box,
+            ),
+        )
+
+    def post(self, request, *args, **kwargs):
+        mode = request.POST.get('mode')
+        if mode == self.MODE_ENTER_BOX_NUMBER:
+            return self.post_box_number(request)
+        if mode == self.MODE_ENTER_LOCATION:
+            return self.post_location(request)
+        print(f"Unrecognized mode '{mode}'")
+        return render(request, self.template_name, {})
 
 # EOF

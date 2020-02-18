@@ -15,22 +15,28 @@ from .models import \
     LocTier, \
     Product, \
     ProductCategory, \
-    ProductExample
+    ProductExample, \
+    Pallet, \
+    PalletBox, \
+    Profile
 
 __author__ = '(Multiple)'
 __project__ = "Food-Pantry-Inventory"
 __creation_date__ = "04/01/2019"
 
+
 # Register the models for which we want default admin pages to be built.
 admin.site.register(Activity)
 admin.site.register(ProductCategory)
 admin.site.register(ProductExample)
-admin.site.register(Location)
+admin.site.register(Pallet)
+admin.site.register(PalletBox)
 
 
 @admin.register(Box)
 class BoxAdmin(admin.ModelAdmin):
     list_display = (
+        'id',
         'box_number',
         'box_type',
         'location',
@@ -60,6 +66,21 @@ class ConstraintsAdmin(admin.ModelAdmin):
     )
 
 
+@admin.register(Location)
+class Location(admin.ModelAdmin):
+    list_display = (
+        'pk',
+        'loc_row',
+        'loc_bin',
+        'loc_tier',
+    )
+    list_filter = (
+        'loc_row',
+        'loc_bin',
+        'loc_tier',
+    )
+
+
 @admin.register(LocBin)
 class LocBinAdmin(admin.ModelAdmin):
     list_display = ('loc_bin', 'loc_bin_descr')
@@ -82,5 +103,13 @@ class ProductAdmin(admin.ModelAdmin):
         'prod_cat',
     )
 
+
+@admin.register(Profile)
+class ProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        'user',
+        'title',
+        'active_pallet_id',
+    )
 
 # EOF
